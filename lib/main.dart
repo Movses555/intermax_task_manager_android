@@ -81,12 +81,6 @@ class _MainPageState extends State<TaskManagerMainPage> {
           centerTitle: false,
           backgroundColor: Colors.deepOrangeAccent,
           automaticallyImplyLeading: false,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () => null,
-            )
-          ],
         ),
         body: loginInterface()
       ),
@@ -235,44 +229,6 @@ class _MainPageState extends State<TaskManagerMainPage> {
         );
       },
     );
-  }
-
-  // User login
-  Future _loginUser(List<TextEditingController> controllersList, bool isChecked) async {
-    var ip = controllersList[0].text;
-    var name = controllersList[1].text;
-    var password = controllersList[2].text;
-
-    User? userData;
-    var data = {'ip': ip, 'name': name, 'password': password};
-
-    return Future.wait([
-      ServerSideApi.create(ip, 2).loginUser(data).then((value) => userData = value.body),
-    ]).whenComplete(() async {
-      if(ip == '' || name == '' || password == ''){
-        _showMessage!.show(context, 3);
-      }else{
-        if(userData!.status == 'account_exists'){
-          Navigator.pop(context);
-          _showMessage!.show(context, 4);
-          if(isChecked == true){
-            setState(() {
-              UserState.temporaryIp = ip;
-              UserState.userName = userData!.username;
-              UserState.rememberUser(ip, userData!.username, password);
-            });
-          }else{
-            setState(() {
-              UserState.temporaryIp = ip;
-              UserState.userName = userData!.username;
-            });
-          }
-          Navigator.push(context, MaterialPageRoute(builder: (context) => const TaskPage()));
-        }else if (userData!.status == 'account_not_exists'){
-          _showMessage!.show(context, 5);
-        }
-      }
-    });
   }
 
   // Brigade login

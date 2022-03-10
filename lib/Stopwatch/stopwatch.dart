@@ -70,9 +70,6 @@ class StopWatch {
     void tick(_) {
       counter++;
       streamController!.add(counter);
-      if (!flag!) {
-        stopTimer();
-      }
     }
 
     void startTimer() {

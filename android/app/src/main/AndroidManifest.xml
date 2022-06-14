@@ -2,8 +2,9 @@
     package="com.intermax.apps.intermax_task_manager">
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
-   <application
-        android:label="intermax_task_manager"
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <application
+        android:label="Планировщик задач INTERMAX"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

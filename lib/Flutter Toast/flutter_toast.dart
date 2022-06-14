@@ -85,11 +85,11 @@ class ShowMessage{
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: const [
-              Icon(Icons.check),
+              Icon(Icons.check, color: Colors.white),
               SizedBox(
                 width: 5,
               ),
-               Text("Добро пожаловать"),
+               Text("Добро пожаловать", style: TextStyle(color: Colors.white)),
             ],
           ),
         );
@@ -159,11 +159,29 @@ class ShowMessage{
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: const [
-              Icon(Icons.warning),
+              Icon(Icons.warning, color: Colors.white),
               SizedBox(
                 width: 5.0,
               ),
               Text("Выберите цвет задания"),
+            ],
+          ),
+        );
+        break;
+      case 9:
+        toast = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.redAccent),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(Icons.error, color: Colors.white),
+              SizedBox(
+                  width: 5
+              ),
+              Text("Вы уже на задании", style: TextStyle(color: Colors.white)),
             ],
           ),
         );

@@ -33,16 +33,8 @@ class _$ServerSideApi extends ServerSideApi {
   }
 
   @override
-  Future<Response<dynamic>> updateOnWayTime(dynamic data) {
-    final $url = '/update_time_1.php';
-    final $body = data;
-    final $request = Request('POST', $url, client.baseUrl, body: $body);
-    return client.send<dynamic, dynamic>($request);
-  }
-
-  @override
-  Future<Response<dynamic>> updateWorkTime(dynamic data) {
-    final $url = '/update_time_2.php';
+  Future<Response<dynamic>> updateBrigadeStatus(dynamic data) {
+    final $url = '/update_brigade_status.php';
     final $body = data;
     final $request = Request('POST', $url, client.baseUrl, body: $body);
     return client.send<dynamic, dynamic>($request);
@@ -51,6 +43,14 @@ class _$ServerSideApi extends ServerSideApi {
   @override
   Future<Response<List<TaskServerModel>>> getBrigadeTask(dynamic data) {
     final $url = '/get_brigade_tasks.php';
+    final $body = data;
+    final $request = Request('POST', $url, client.baseUrl, body: $body);
+    return client.send<List<TaskServerModel>, TaskServerModel>($request);
+  }
+
+  @override
+  Future<Response<List<TaskServerModel>>> getBrigadeTasksHistory(dynamic data) {
+    final $url = '/get_brigade_tasks_history.php';
     final $body = data;
     final $request = Request('POST', $url, client.baseUrl, body: $body);
     return client.send<List<TaskServerModel>, TaskServerModel>($request);

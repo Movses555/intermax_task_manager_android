@@ -1,11 +1,14 @@
 import 'package:awesome_notifications/awesome_notifications.dart';
+import 'package:chopper/chopper.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:intermax_task_manager/Brigades%20Settings/brigade_details.dart';
 import 'package:intermax_task_manager/Flutter%20Toast/flutter_toast.dart';
 import 'package:intermax_task_manager/ServerSideApi/server_side_api.dart';
+import 'package:intermax_task_manager/Shared%20Preferences/sh_pref.dart';
 import 'package:intermax_task_manager/User%20Details/user_details.dart';
 import 'package:intermax_task_manager/User%20State/user_state.dart';
+import 'package:intermax_task_manager/host.dart';
 import 'package:intermax_task_manager/tasks_page.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 import 'package:universal_platform/universal_platform.dart';
@@ -15,14 +18,18 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await UserState.init();
   await Firebase.initializeApp();
+  await ShPref.init();
   AwesomeNotifications().initialize(
     null,
     [
       NotificationChannel(
           channelKey: 'high_importance_channel',
           channelName: 'Basic Notifications',
-          channelDescription: 'Description',
-          importance: NotificationImportance.High)
+          channelDescription: 'Intermax Task Manager',
+          defaultRingtoneType: DefaultRingtoneType.Notification,
+          importance: NotificationImportance.High,
+          enableVibration: true,
+      )
     ],
   );
   runApp(const MaterialApp(
@@ -45,6 +52,7 @@ class _MainPageState extends State<TaskManagerMainPage> {
   var _passwordFieldFocus;
 
   ShowMessage? _showMessage;
+
 
   @override
   void initState() {
@@ -237,11 +245,11 @@ class _MainPageState extends State<TaskManagerMainPage> {
     var password = controllersList[2].text;
 
     Brigade? brigadeData;
-    var data = {'ip': '192.168.0.38', 'name': name, 'password': password};
+    var data = {'ip': Host.ip, 'name': name, 'password': password};
 
     return Future.wait([
-      ServerSideApi.create('192.168.0.38', 4).loginBrigade(data).then((value) => brigadeData = value.body),
-    ]).whenComplete(() {
+      ServerSideApi.create(Host.ip, 4).loginBrigade(data).then((value) => brigadeData = value.body),
+    ]).whenComplete(() async {
       if(name == '' || password == '') {
         _showMessage!.show(context, 3);
       } else {
@@ -251,13 +259,23 @@ class _MainPageState extends State<TaskManagerMainPage> {
           if(isChecked == true){
             setState(() {
               UserState.userName = brigadeData!.username;
-              UserState.rememberUser('192.168.0.38', brigadeData!.username, password);
+              UserState.rememberUser(Host.ip, brigadeData!.username, password);
             });
           }else{
             setState(() {
               UserState.userName = brigadeData!.username;
             });
           }
+
+
+          var data = {
+            'brigade' : brigadeData!.brigade,
+            'status' : 'Online'
+          };
+
+         await ServerSideApi.create(Host.ip, 1).updateBrigadeStatus(data);
+
+
           UserState.rememberUserState(true);
           Navigator.push(context, MaterialPageRoute(builder: (context) => const TaskPage()));
         }else if (brigadeData!.status == 'account_not_exists'){

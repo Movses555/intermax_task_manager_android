@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:awesome_notifications/awesome_notifications.dart';
 import 'package:chopper/chopper.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:intermax_task_manager/Flutter%20Toast/flutter_toast.dart';
 import 'package:intermax_task_manager/Location%20Service/location_service.dart';
-import 'package:intermax_task_manager/Stopwatch/stopwatch.dart';
+import 'package:intermax_task_manager/Shared%20Preferences/sh_pref.dart';
+import 'package:intermax_task_manager/host.dart';
 import 'package:location/location.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -22,18 +24,6 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  AwesomeNotifications().createNotification(
-      content: NotificationContent(
-          id: 1,
-          channelKey: 'high_importance_channel',
-          wakeUpScreen: true,
-          displayOnBackground: true,
-          backgroundColor: Colors.purpleAccent,
-          displayOnForeground: true,
-          title: '${message.notification!.title}',
-          body: '${message.notification!.body}'
-      )
-  );
 }
 
 class TaskPage extends StatefulWidget {
@@ -43,27 +33,14 @@ class TaskPage extends StatefulWidget {
   _TasksPageState createState() => _TasksPageState();
 }
 
-class _TasksPageState extends State<TaskPage>
-    with SingleTickerProviderStateMixin {
+class _TasksPageState extends State<TaskPage> with SingleTickerProviderStateMixin, WidgetsBindingObserver{
+
+
+  var dateFormatter = DateFormat('dd.MM.yyyy');
 
   Stream? _socketBroadcastStream;
   WebSocketChannel? _webSocketChannel;
   LocationService? _locationService;
-
-  String? onWayHoursStr = '00';
-  String? onWayMinutesStr = '00';
-  String? onWaySecondsStr = '00';
-
-  String? workStartedHoursStr = '00';
-  String? workStartedMinutesStr = '00';
-  String? workStartedSecondsStr = '00';
-
-  String? allTaskTimeHours = '00';
-  String? allTaskTimeMinutes = '00';
-  String? allTaskTimeSeconds = '00';
-
-  String? onWayTime = '00:00:00';
-  String? workTime = '00:00:00';
 
   StateSetter? taskState;
   StateSetter? statusState;
@@ -83,33 +60,33 @@ class _TasksPageState extends State<TaskPage>
   FocusNode? _tasksFocusNode;
 
   List<TaskServerModel>? _brigadeTaskList;
-  List<LocationData>? locations;
+  List<TaskServerModel>? _brigadeTasksHistoryList;
+  List<LocationData>? locations = [];
 
-  Stream<int>? onWayTimerStream;
-  Stream<int>? workStartedTimerStream;
-
-  StreamSubscription<int>? onWayTimerSubscription;
-  StreamSubscription<int>? workStartedTimerSubscription;
-
-  StopWatch? stopWatch;
-
-  var dateFormatter = DateFormat('dd.MM.yyyy');
+  ShowMessage? _showMessage;
 
   @override
   void initState() {
     super.initState();
-    Tasks.initPreferences();
-    Brigades.initPreferences();
 
-    stopWatch = StopWatch.init();
+    WidgetsBinding.instance.addObserver(this);
 
+    _showMessage = ShowMessage.init();
     _tasksFocusNode = FocusNode();
     _ipAddressFocusNode = FocusNode();
     _nameFocusNode = FocusNode();
     _passwordFocusNode = FocusNode();
 
+    Tasks.initPreferences();
+    Brigades.initPreferences();
+
     FirebaseMessaging.instance.getInitialMessage();
-    FirebaseMessaging.instance.subscribeToTopic(Translit().toTranslit(source: UserState.getBrigade()!));
+    if(UserState.getBrigade() == 'Эдо-Артур'){
+      FirebaseMessaging.instance.subscribeToTopic('Edo-Artur');
+    }else{
+      FirebaseMessaging.instance.subscribeToTopic(Translit().toTranslit(source: UserState.getBrigade()!));
+    }
+
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
     FirebaseMessaging.onMessage.listen((message) {
@@ -130,17 +107,44 @@ class _TasksPageState extends State<TaskPage>
       }
     });
 
-    _webSocketChannel = WebSocketChannel.connect(Uri.parse('ws://192.168.0.38:8080'));
+    _webSocketChannel = WebSocketChannel.connect(Uri.parse('ws://${Host.socketIP}'));
     _socketBroadcastStream = _webSocketChannel!.stream.asBroadcastStream();
 
     _locationService = LocationService.init(_webSocketChannel, _socketBroadcastStream);
     _locationService!.checkLocationPermission();
     _locationService!.checkLocationStatus();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      var data = {
+        'brigade' : UserState.getBrigade(),
+        'status' : 'Online'
+      };
+
+      await ServerSideApi.create(Host.ip, 1).updateBrigadeStatus(data);
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch(state){
+      case AppLifecycleState.resumed:
+        _webSocketChannel = WebSocketChannel.connect(Uri.parse('ws://${Host.socketIP}'));
+        _socketBroadcastStream = _webSocketChannel!.stream.asBroadcastStream();
+        break;
+      case AppLifecycleState.inactive:
+        // TODO: Handle this case.
+        break;
+      case AppLifecycleState.paused:
+        // TODO: Handle this case.
+        break;
+      case AppLifecycleState.detached:
+        // TODO: Handle this case.
+        break;
+    }
   }
 
   @override
   void dispose() {
-    super.dispose();
 
     _webSocketChannel!.sink.close();
 
@@ -148,7 +152,10 @@ class _TasksPageState extends State<TaskPage>
     _nameFocusNode!.dispose();
     _passwordFocusNode!.dispose();
     _tasksFocusNode!.dispose();
+
+    super.dispose();
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -168,18 +175,23 @@ class _TasksPageState extends State<TaskPage>
               currentIndex: _bottomNavBarItemIndex!,
               selectedItemColor: Colors.deepOrangeAccent,
               unselectedItemColor: Colors.grey,
+              showSelectedLabels: true,
               items: const [
                 BottomNavigationBarItem(
-                    label: 'Новые задачи',
+                    label: 'Новые',
                     icon: Icon(Icons.upcoming_rounded)
                 ),
                 BottomNavigationBarItem(
-                    label: 'Текущие задачи',
+                    label: 'Текущие',
                     icon: Icon(Icons.task_rounded)
                 ),
                 BottomNavigationBarItem(
-                    label: 'Завершённые задачи',
+                    label: 'Завершённые',
                     icon: Icon(Icons.done)
+                ),
+                BottomNavigationBarItem(
+                    label: 'История',
+                    icon: Icon(Icons.history)
                 ),
                 BottomNavigationBarItem(
                     label: 'Выйти',
@@ -200,11 +212,15 @@ class _TasksPageState extends State<TaskPage>
                     _bottomNavBarItemIndex = index;
                   });
                 } else if (index == 3) {
+                  setState(() {
+                    _bottomNavBarItemIndex = index;
+                  });
+                } else if (index == 4) {
                   _showSignOutDialog();
                 }
               },
             ),
-          body: getBrigadeTasks(_bottomNavBarItemIndex!)
+          body: _bottomNavBarItemIndex != 3 ? getBrigadeTasks(_bottomNavBarItemIndex!) : getBrigadeTasksHistory()
       ),
       breakpoints: const [
         ResponsiveBreakpoint.resize(500, name: MOBILE),
@@ -215,9 +231,12 @@ class _TasksPageState extends State<TaskPage>
     );
   }
 
-  // Getting tasks from server (Android version)
+  // Getting tasks from server
   FutureBuilder<Response<List<TaskServerModel>>> getBrigadeTasks(int index) {
+
     String? status;
+    String? formattedDate = dateFormatter.format(DateTime.now());
+
     switch (index) {
       case 0:
         status = 'Не выполнено';
@@ -230,13 +249,13 @@ class _TasksPageState extends State<TaskPage>
         break;
     }
     var data = {
-      'ip': '192.168.0.38',
       'brigade': UserState.getBrigade(),
+      'date' : formattedDate,
       'status': status
     };
 
     return FutureBuilder<Response<List<TaskServerModel>>>(
-      future: ServerSideApi.create('192.168.0.38', 3).getBrigadeTask(data),
+      future: ServerSideApi.create(Host.ip, 3).getBrigadeTask(data),
       builder: (context, snapshot) {
         while (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -247,9 +266,14 @@ class _TasksPageState extends State<TaskPage>
         }
 
         if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+          print(snapshot.data!.bodyString);
           _brigadeTaskList = snapshot.data!.body;
+
+          _brigadeTaskList!.sort((a,b) => (a.isUrgent.toString().compareTo(b.isUrgent.toString())));
+          _brigadeTaskList = _brigadeTaskList!.reversed.toList();
           return buildTaskForBrigade(_brigadeTaskList);
         } else {
+          _listenSocket(null);
           return const Center(
             child: Text('Список задач пуст', style: TextStyle(fontSize: 20)),
           );
@@ -258,7 +282,36 @@ class _TasksPageState extends State<TaskPage>
     );
   }
 
-  // Building tasks table for specific brigade(Android version)
+  // Getting tasks history from server
+  FutureBuilder<Response<List<TaskServerModel>>> getBrigadeTasksHistory(){
+    var data = {
+      'brigade' : UserState.getBrigade()
+    };
+
+    return FutureBuilder<Response<List<TaskServerModel>>>(
+      future: ServerSideApi.create(Host.ip, 3).getBrigadeTasksHistory(data),
+      builder: (context, snapshot){
+        while (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(
+              color: Colors.deepOrangeAccent,
+            ),
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+          _brigadeTasksHistoryList = snapshot.data!.body;
+          return buildTasksHistory(_brigadeTasksHistoryList);
+        } else {
+          return const Center(
+            child: Text('Список пуст', style: TextStyle(fontSize: 20)),
+          );
+        }
+      },
+    );
+  }
+
+  // Building tasks table for specific brigade
   StatefulBuilder buildTaskForBrigade(List<TaskServerModel>? _brigadeTaskList) {
     return StatefulBuilder(
       builder: (context, brigadesTaskState){
@@ -274,6 +327,8 @@ class _TasksPageState extends State<TaskPage>
             }
 
             _listenSocket(brigadeTask);
+
+
             return GestureDetector(
               child: Card(
                   elevation: 5,
@@ -282,40 +337,62 @@ class _TasksPageState extends State<TaskPage>
                       mainAxisAlignment: MainAxisAlignment.start,
                       children: [
                         ListTile(
-                          title: Text(brigadeTask.task, style: TextStyle(
-                              color: Color(int.parse('0x' + brigadeTask.color)),
-                              fontWeight: FontWeight.bold,
-                              fontSize: 20)),
-                          trailing: _bottomNavBarItemIndex == 0
-                              ? Text(brigadeTask.status, style: const TextStyle(color: Colors.red, fontSize: 18)) :_bottomNavBarItemIndex == 1
-                              ? Text(brigadeTask.status,
-                              style: TextStyle(color: brigadeTask.status == 'В пути' ? Colors.orangeAccent[700] : Colors.yellow[700], fontSize: 18)) : _bottomNavBarItemIndex == 2
-                              ? Text(brigadeTask.status, style: const TextStyle(color: Colors.green, fontSize: 18)) : null,
+                          title: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(brigadeTask.task, style: TextStyle(
+                                  color: Color(int.parse('0x' + brigadeTask.color)),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 20)),
+                              Column(
+                                children: [
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      SizedBox(height: 20),
+                                      _bottomNavBarItemIndex == 0
+                                          ? Text(brigadeTask.status, style: const TextStyle(color: Colors.red, fontSize: 18)) :_bottomNavBarItemIndex == 1
+                                          ? Text(brigadeTask.status,
+                                          style: TextStyle(color: brigadeTask.status == 'В пути' ? Colors.orangeAccent[700] : Colors.yellow[700], fontSize: 18)) : _bottomNavBarItemIndex == 2
+                                          ? Text(brigadeTask.status, style: const TextStyle(color: Colors.green, fontSize: 18)) : Container(),
+                                      SizedBox(height: 10),
+                                      Text(brigadeTask.time, style: TextStyle(color: Colors.grey))
+                                    ],
+                                  ),
+                                ],
+                              )
+                            ],
+                          ),
                         ),
                         Padding(
                           padding: const EdgeInsets.only(left: 15),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(brigadeTask.date + " в " + brigadeTask.time,
-                                style: const TextStyle(fontSize: 20),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(brigadeTask.address!,
-                                style: const TextStyle(fontSize: 20),
-                              ),
-                              const SizedBox(height: 5),
-                              brigadeTask.note1 != '' || brigadeTask.note2 != '' ? Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text('Примечание', style: TextStyle(fontSize: 20, color: Colors.grey[700])),
-                                ],
-                              ) : Container(),
-                              brigadeTask.note1 != '' ? Text(brigadeTask.note1, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)) : Container(),
-                              brigadeTask.note2 != '' ? Text(brigadeTask.note2, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)) : Container(),
-                              const SizedBox(height: 5)
-                            ],
-                          ),
+                          child: Container(
+                            width: 260,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    brigadeTask.isUrgent == '1' ?
+                                    Text('Срочно', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.red))
+                                        : Container()
+                                  ],
+                                ),
+                                Text(brigadeTask.address!,
+                                  style: const TextStyle(fontSize: 20),
+                                ),
+                                brigadeTask.note1 != '' || brigadeTask.note2 != '' ? Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text('Примечание', style: TextStyle(fontSize: 20, color: Colors.grey[700])),
+                                  ],
+                                ) : Container(),
+                                brigadeTask.note1 != '' ? Text(brigadeTask.note1, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)) : Container(),
+                                brigadeTask.note2 != '' ? Text(brigadeTask.note2, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)) : Container(),
+                                const SizedBox(height: 5)
+                              ],
+                            ),
+                          )
                         )
                       ]
                   )
@@ -362,7 +439,7 @@ class _TasksPageState extends State<TaskPage>
                                         title: Text(brigadeTask.telephone),
                                         leading: const Icon(Icons.phone),
                                         onTap: () {
-                                          launch('tel://${brigadeTask.telephone!}');
+                                          launchUrl(Uri.parse('tel://${brigadeTask.telephone!}'));
                                         },
                                       ),
                                       const Divider(height: 1),
@@ -377,52 +454,41 @@ class _TasksPageState extends State<TaskPage>
                                       SizedBox(
                                         width: 300,
                                         child: FloatingActionButton.extended(
-                                            label: Center(
-                                              child: Column(
-                                                children: [
-                                                  const Text('В пути'),
-                                                  const SizedBox(height: 0.5),
-                                                  Text("$onWayHoursStr:$onWayMinutesStr:$onWaySecondsStr")
-                                                ],
-                                              ),
+                                            label: const Center(
+                                              child: Text('В пути'),
                                             ),
                                             backgroundColor: brigadeTask.status == 'Не выполнено'
                                                 ? Colors.orangeAccent[700]
                                                 : Colors.grey,
-                                            onPressed: brigadeTask.status == 'Не выполнено'
-                                                ? () async {
+                                            onPressed: brigadeTask.status == 'Не выполнено' ? () async {
 
-                                              var data = {
-                                                'ip': '192.168.0.38',
-                                                'id': brigadeTask.id,
-                                                'status': 'В пути'
-                                              };
-                                              Response response = await ServerSideApi.create('192.168.0.38', 1).updateStatus(data);
+                                              if(ShPref.getHasTask() == false){
+                                                ShPref.setHasTask(true);
 
-                                              var socketData = {
-                                                'id' : brigadeTask.id,
-                                                'status' : 'В пути'
-                                              };
+                                                var data = {
+                                                  'ip': Host.ip,
+                                                  'id': brigadeTask.id,
+                                                  'cords' : '',
+                                                  'status': 'В пути'
+                                                };
 
-                                              _webSocketChannel!.sink.add(json.encode(socketData));
+                                                Response response = await ServerSideApi.create(Host.ip, 1).updateStatus(data);
 
-                                             locations = _locationService!.getLocationChanges();
+                                                var socketData = {
+                                                  'id' : brigadeTask.id,
+                                                  'status' : 'В пути'
+                                                };
 
+                                                _webSocketChannel!.sink.add(json.encode(socketData));
 
-                                              if (response.body == 'status_updated') {
-                                                Navigator.pop(context);
-                                                _bottomNavBarItemIndex = 1;
-                                                setState(() {});
+                                                if (response.body == 'status_updated') {
+                                                  Navigator.pop(context);
+                                                  _bottomNavBarItemIndex = 1;
+                                                  setState(() {});
+                                                }
+                                              }else{
+                                                _showMessage!.show(context, 9);
                                               }
-
-                                              onWayTimerStream = stopWatch!.onWayStopWatchStream();
-                                              onWayTimerSubscription = onWayTimerStream!.listen((tick) {
-                                                taskInfoState!(() {
-                                                  onWayHoursStr = ((tick / (60 * 60)) % 60).floor().toString().padLeft(2, '0');
-                                                  onWayMinutesStr = ((tick / 60) % 60).floor().toString().padLeft(2, '0');
-                                                  onWaySecondsStr = (tick % 60).floor().toString().padLeft(2, '0');
-                                                });
-                                              });
                                             } : null
                                         ),
                                       ),
@@ -430,43 +496,29 @@ class _TasksPageState extends State<TaskPage>
                                       SizedBox(
                                         width: 300,
                                         child: FloatingActionButton.extended(
-                                          label: Center(
-                                            child: Column(
-                                              children: [
-                                                const Text('На месте'),
-                                                const SizedBox(height: 0.5),
-                                                Text("$workStartedHoursStr:$workStartedMinutesStr:$workStartedSecondsStr")
-                                              ],
-                                            ),
+                                          label: const Center(
+                                            child: Text('На месте'),
                                           ),
                                           backgroundColor: brigadeTask.status == 'В пути'
                                               ? Colors.yellow[700]
                                               : Colors.grey,
                                           onPressed: brigadeTask.status == 'В пути' ? () async {
 
-                                            var data = {
-                                              'ip': '192.168.0.38',
-                                              'id': brigadeTask.id,
-                                              'cords' : json.encode(locations),
-                                              'status': 'На месте'
-                                            };
 
-                                            var timeData = {
-                                              'ip' : '192.168.0.38',
-                                              'id' : brigadeTask.id,
-                                              'on_way_time' : '$onWayHoursStr:$onWayMinutesStr:$onWaySecondsStr',
+                                            var data = {
+                                              'ip': Host.ip,
+                                              'id': brigadeTask.id,
+                                              'cords': '',
+                                              'status': 'На месте'
                                             };
 
                                             var socketData = {
                                               'id' : brigadeTask.id,
                                               'status' : 'На месте',
-                                              'onWayTime' : '$onWayHoursStr:$onWayMinutesStr:$onWaySecondsStr'
                                             };
 
-                                            Response response = await ServerSideApi.create('192.168.0.38', 1).updateStatus(data).whenComplete(() async {
-                                              await ServerSideApi.create('192.168.0.38', 1).updateOnWayTime(timeData).whenComplete((){
-                                                _webSocketChannel!.sink.add(json.encode(socketData));
-                                              });
+                                            Response response = await ServerSideApi.create(Host.ip, 1).updateStatus(data).whenComplete(() async {
+                                              _webSocketChannel!.sink.add(json.encode(socketData));
                                             });
 
 
@@ -475,18 +527,6 @@ class _TasksPageState extends State<TaskPage>
                                               _bottomNavBarItemIndex = 1;
                                               setState(() {});
                                             }
-
-                                            onWayTimerSubscription!.cancel();
-                                            onWayTimerStream = null;
-
-                                            workStartedTimerStream = stopWatch!.workStartedStopWatchStream();
-                                            workStartedTimerSubscription = workStartedTimerStream!.listen((tick) {
-                                              taskInfoState!(() {
-                                                workStartedHoursStr = ((tick / (60 * 60)) % 60).floor().toString().padLeft(2, '0');
-                                                workStartedMinutesStr = ((tick / 60) % 60).floor().toString().padLeft(2, '0');
-                                                workStartedSecondsStr = (tick % 60).floor().toString().padLeft(2, '0');
-                                              });
-                                            });
                                           } : null,
                                         ),
                                       ),
@@ -494,61 +534,34 @@ class _TasksPageState extends State<TaskPage>
                                       SizedBox(
                                         width: 300,
                                         child: FloatingActionButton.extended(
-                                            label: Center(
-                                              child: Column(
-                                                children: [
-                                                  const Text('Завершено'),
-                                                  const SizedBox(height: 0.5),
-                                                  Text(brigadeTask.allTaskTime)
-                                                ],
-                                              ),
+                                            label: const Center(
+                                              child: Text('Завершено'),
                                             ),
                                             backgroundColor: brigadeTask.status == 'На месте'
                                                 ? Colors.green[700]
                                                 : brigadeTask.status == 'Завершено' ? Colors.grey : Colors.grey,
-                                            onPressed: brigadeTask.status == 'На месте'
-                                                ? () async {
+                                            onPressed: brigadeTask.status == 'На месте' ? () async {
 
-                                              allTaskTimeSeconds = (int.parse(onWaySecondsStr!) + int.parse(workStartedSecondsStr!)).floor().toString().padLeft(2, '0');
-                                              allTaskTimeMinutes = (int.parse(onWayMinutesStr!) + int.parse(workStartedMinutesStr!)).floor().toString().padLeft(2, '0');
-                                              allTaskTimeHours = (int.parse(onWayHoursStr!) + int.parse(workStartedHoursStr!)).floor().toString().padLeft(2, '0');
 
-                                              if(int.parse(allTaskTimeSeconds!) >= 60){
-                                                allTaskTimeSeconds = (int.parse(allTaskTimeSeconds!) - 60).floor().toString().padLeft(2, '0');
-                                                allTaskTimeMinutes = (int.parse(allTaskTimeMinutes!) + 1).floor().toString().padLeft(2, '0');
-                                              }
+                                              ShPref.setHasTask(false);
+                                              locations = _locationService!.getLocations();
 
-                                              if(int.parse(allTaskTimeMinutes!) >= 60){
-                                                allTaskTimeMinutes = (int.parse(allTaskTimeMinutes!) - 60).floor().toString().padLeft(2, '0');
-                                                allTaskTimeHours = (int.parse(allTaskTimeHours!) + 1).floor().toString().padLeft(2, '0');
-                                              }
-
-                                              String allTaskTimeStr = '$allTaskTimeHours:$allTaskTimeMinutes:$allTaskTimeSeconds';
 
                                               var data = {
-                                                'ip': '192.168.0.38',
+                                                'ip': Host.ip,
                                                 'id': brigadeTask.id,
+                                                'cords' : jsonEncode(locations),
                                                 'status': 'Завершено'
                                               };
 
-                                              var timeData = {
-                                                'ip': '192.168.0.38',
-                                                'id': brigadeTask.id,
-                                                'work_time' : '$workStartedHoursStr:$workStartedMinutesStr:$workStartedSecondsStr',
-                                                'all_task_time' : allTaskTimeStr
-                                              };
 
                                               var socketData = {
                                                 'id' : brigadeTask.id,
                                                 'status' : 'Завершено',
-                                                'workTime' : '$workStartedHoursStr:$workStartedMinutesStr:$workStartedSecondsStr',
-                                                'allTaskTime' : allTaskTimeStr
                                               };
 
-                                              Response response = await ServerSideApi.create('192.168.0.38', 1).updateStatus(data).whenComplete(() async {
-                                                await ServerSideApi.create('192.168.0.38', 1).updateWorkTime(timeData).whenComplete((){
-                                                  _webSocketChannel!.sink.add(json.encode(socketData));
-                                                });
+                                              Response response = await ServerSideApi.create(Host.ip, 1).updateStatus(data).whenComplete(() async {
+                                                _webSocketChannel!.sink.add(json.encode(socketData));
                                               });
 
 
@@ -557,13 +570,59 @@ class _TasksPageState extends State<TaskPage>
                                                 _bottomNavBarItemIndex = 2;
                                                 setState(() {});
                                               }
-
-                                              workStartedTimerSubscription!.cancel();
-                                              workStartedTimerStream = null;
                                             } : null
                                         ),
                                       ),
                                       const SizedBox(height: 10),
+                                      SizedBox(
+                                        width: 300,
+                                        child: FloatingActionButton.extended(
+                                            label: const Center(
+                                              child: Text('Не завершено'),
+                                            ),
+                                            backgroundColor: Colors.red,
+                                            onPressed: () async {
+
+                                              ShPref.setHasTask(false);
+                                              locations = _locationService!.getLocations();
+
+
+                                              var data = {
+                                                'ip': Host.ip,
+                                                'id': brigadeTask.id,
+                                                'cords' : jsonEncode(locations),
+                                                'status': 'Не завершено'
+                                              };
+
+                                              var socketData = {
+                                                'id' : brigadeTask.id,
+                                                'status' : 'Не завершено',
+                                              };
+
+                                              Response response = await ServerSideApi.create(Host.ip, 1).updateStatus(data).whenComplete(() async {
+                                                _webSocketChannel!.sink.add(json.encode(socketData));
+                                              });
+
+                                              await ServerSideApi.create(Host.ip, 1).updateStatus(data).whenComplete(() async {
+                                                _webSocketChannel!.sink.add(json.encode(socketData));
+                                              });
+
+
+                                              if (response.body == 'status_updated') {
+                                                Navigator.pop(context);
+                                                _bottomNavBarItemIndex = 2;
+                                                setState(() {});
+                                              }
+                                            }
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Divider(
+                                        height: 10,
+                                        thickness: 1,
+                                        color: Colors.grey,
+                                      ),
+                                      const SizedBox(height: 5),
                                       SizedBox(
                                         width: 300,
                                         child: FloatingActionButton.extended(
@@ -590,6 +649,156 @@ class _TasksPageState extends State<TaskPage>
     );
   }
 
+  // Building tasks history for specific brigade
+  Widget buildTasksHistory(List<TaskServerModel>? _tasksHistory){
+    return ListView.builder(
+      itemCount: _tasksHistory!.length,
+      itemBuilder: (context, index){
+        TaskServerModel _task = _tasksHistory[index];
+        return InkWell(
+          onTap: (){
+            showDialog(
+                context: context,
+                builder: (context) {
+                  return StatefulBuilder(
+                    builder: (context, dialogState) {
+                      taskInfoState = dialogState;
+                      return SizedBox(
+                        child: SimpleDialog(
+                          title: const Text(
+                            'Детали о задаче',
+                            style: TextStyle(color: Colors.black, fontSize: 30),
+                          ),
+                          contentPadding: const EdgeInsets.only(left: 5, right: 5, bottom: 20),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
+                          backgroundColor: Colors.white,
+                          children: [
+                            const SizedBox(height: 5),
+                            Center(
+                              child: Column(
+                                children: [
+                                  ListTile(
+                                    title: Text(
+                                      _task.task,
+                                      style: TextStyle(color: Color(
+                                          int.parse('0x' + _task.color))),
+                                    ),
+                                    leading: const Icon(Icons.task),
+                                  ),
+                                  const Divider(height: 1),
+                                  ListTile(
+                                    title: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('Время в пути', style: TextStyle(fontWeight: FontWeight.bold)),
+                                        const SizedBox(height: 3),
+                                        Text(_task.onWayTime),
+                                      ],
+                                    ),
+                                    leading: const Icon(
+                                        Icons.timelapse),
+                                  ),
+                                  const Divider(height: 1),
+                                  ListTile(
+                                    title: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('Время работы', style: TextStyle(fontWeight: FontWeight.bold)),
+                                        const SizedBox(height: 3),
+                                        Text(_task.workTime),
+                                      ],
+                                    ),
+                                    leading: const Icon(Icons.timelapse),
+                                  ),
+                                  const Divider(height: 1),
+                                  ListTile(
+                                      title: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Общее время работы', style: TextStyle(fontWeight: FontWeight.bold)),
+                                          const SizedBox(height: 3),
+                                          Text(_task.allTaskTime),
+                                        ],
+                                      ),
+                                      leading: const Icon(
+                                          Icons.timelapse)
+                                  ),
+                                  const SizedBox(height: 10),
+                                  SizedBox(
+                                    width: 300,
+                                    child: FloatingActionButton.extended(
+                                      label: const Text('Закрыть'),
+                                      backgroundColor: Colors.deepOrange,
+                                      onPressed: () => Navigator.pop(context),
+                                    ),
+                                  )
+                                ],
+                              ),
+                            )
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                }
+            );
+          },
+          child: Card(
+              elevation: 5,
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    ListTile(
+                      title: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(_task.task, style: TextStyle(
+                              color: Color(int.parse('0x' + _task.color)),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20)),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              SizedBox(height: 10),
+                              Text(_task.status, style: TextStyle(color: _task.status == 'Завершено' ? Colors.green : Colors.red, fontSize: 20)),
+                              SizedBox(height: 10),
+                              Text(_task.date + '    ' + _task.time, style: TextStyle(color: Colors.grey))
+                            ],
+                          )
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 15),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 3),
+                          Text(_task.address!,
+                            style: const TextStyle(fontSize: 20),
+                          ),
+                          const SizedBox(height: 5),
+                          _task.note1 != '' || _task.note2 != '' ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('Примечание', style: TextStyle(fontSize: 20, color: Colors.grey[700])),
+                            ],
+                          ) : Container(),
+                          _task.note1 != '' ? Text(_task.note1, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)) : Container(),
+                          _task.note2 != '' ? Text(_task.note2, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)) : Container(),
+                          const SizedBox(height: 5)
+                        ],
+                      ),
+                    )
+                  ]
+              )
+          ),
+        );
+      },
+    );
+  }
+
   // Showing sign out dialog
   void _showSignOutDialog() {
     Widget _signOutButton = TextButton(
@@ -597,7 +806,14 @@ class _TasksPageState extends State<TaskPage>
         'Выйти',
         style: TextStyle(color: Colors.redAccent),
       ),
-      onPressed: () {
+      onPressed: () async {
+        var data = {
+        'brigade' : UserState.getBrigade(),
+        'status' : 'Offline'
+       };
+
+        await ServerSideApi.create(Host.ip, 1).updateBrigadeStatus(data);
+
         UserState.rememberUserState(false);
         UserState.clearBrigade();
         Navigator.push(context, MaterialPageRoute(builder: (context) => const TaskManagerMainPage()));
@@ -627,18 +843,25 @@ class _TasksPageState extends State<TaskPage>
   }
 
   // Listening socket
-  void _listenSocket(TaskServerModel brigadeTask){
+  void _listenSocket(TaskServerModel? brigadeTask){
     _socketBroadcastStream!.listen((event) {
       Map<String, dynamic> eventMap = json.decode(event);
       String? taskId = eventMap['id'];
       String? brigade = eventMap['brigade'];
+
+      bool? newTask = eventMap['new_task'];
       bool? deleteTask = eventMap['delete_task'];
 
-      if(deleteTask != null && brigade == UserState.getBrigade()){
+      if(deleteTask == true && brigade == UserState.getBrigade()){
+        ShPref.setHasTask(false);
         setState((){});
       }
 
-      if(taskId == brigadeTask.id && brigade == UserState.getBrigade()){
+      if(newTask == true && brigade == UserState.getBrigade()){
+        setState((){});
+      }
+
+      if(brigade == UserState.getBrigade() && brigadeTask!.id == taskId){
         eventMap.forEach((key, value) {
           switch (key) {
             case 'task':
@@ -704,6 +927,7 @@ class _TasksPageState extends State<TaskPage>
 
         switch (eventMap['status']) {
           case 'Не выполнено':
+            ShPref.setHasTask(false);
             setState(() {
               _bottomNavBarItemIndex = 0;
             });
@@ -719,6 +943,7 @@ class _TasksPageState extends State<TaskPage>
             });
             break;
           case 'Завершено':
+            ShPref.setHasTask(false);
             setState(() {
               _bottomNavBarItemIndex = 2;
             });

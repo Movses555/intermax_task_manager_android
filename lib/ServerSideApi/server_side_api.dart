@@ -3,6 +3,7 @@ import 'package:intermax_task_manager/Brigades%20Settings/brigade_details.dart';
 import 'package:intermax_task_manager/JSON%20Converter/JsonToTypeConverter.dart';
 import 'package:intermax_task_manager/Tasks%20Settings/task_server_model.dart';
 import 'package:intermax_task_manager/User%20Details/user_details.dart';
+import 'package:intermax_task_manager/host.dart';
 
 part 'server_side_api.chopper.dart';
 
@@ -15,14 +16,14 @@ abstract class ServerSideApi extends ChopperService{
   @Post(path: '/update_status.php')
   Future<Response> updateStatus(@Body() var data);
 
-  @Post(path: '/update_time_1.php')
-  Future<Response> updateOnWayTime(@Body() var data);
-
-  @Post(path: '/update_time_2.php')
-  Future<Response> updateWorkTime(@Body() var data);
+  @Post(path: '/update_brigade_status.php')
+  Future<Response> updateBrigadeStatus(@Body() var data);
 
   @Post(path: '/get_brigade_tasks.php')
   Future<Response<List<TaskServerModel>>> getBrigadeTask(@Body() var data);
+
+  @Post(path: '/get_brigade_tasks_history.php')
+  Future<Response<List<TaskServerModel>>> getBrigadeTasksHistory(@Body() var data);
 
 
   static ServerSideApi create(String ip, int converterCode){
@@ -50,7 +51,7 @@ abstract class ServerSideApi extends ChopperService{
     }
 
     final client = ChopperClient(
-      baseUrl: 'http://$ip:1072/Intermax Task Manager',
+      baseUrl: 'http://${Host.ip}/Intermax Task Manager',
       services: [_$ServerSideApi()],
       converter: converter,
     );
